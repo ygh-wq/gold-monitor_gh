@@ -381,16 +381,25 @@ def send_email(subject, html_body, recipients):
         msg.attach(MIMEText(html_body, "html", "utf-8"))
         try:
             context = ssl.create_default_context()
-            with smtplib.SMTP(config["smtp_server"], config["smtp_port"], timeout=30) as server:
-                server.ehlo()
-                server.starttls(context=context)
-                server.ehlo()
-                server.login(config["sender_email"], config["smtp_password"])
-                server.sendmail(config["sender_email"], to_email, msg.as_string())
-            print(f"✅ 邮件已发送: {to_email}")
+            # 优先尝试 SSL 465 端口（更稳定）
+            try:
+                with smtplib.SMTP_SSL(config["smtp_server"], 465, timeout=30, context=context) as server:
+                    server.login(config["sender_email"], config["smtp_password"])
+                    server.sendmail(config["sender_email"], to_email, msg.as_string())
+                print(f"✅ 邮件已发送(SSL): {to_email}")
+            except Exception:
+                # 回退到 587 STARTTLS
+                with smtplib.SMTP(config["smtp_server"], 587, timeout=30) as server:
+                    server.ehlo()
+                    server.starttls(context=context)
+                    server.ehlo()
+                    server.login(config["sender_email"], config["smtp_password"])
+                    server.sendmail(config["sender_email"], to_email, msg.as_string())
+                print(f"✅ 邮件已发送(STARTTLS): {to_email}")
         except Exception as e:
             print(f"❌ 发送失败 [{to_email}]: {e}")
     return True
+
 
 
 def main():
