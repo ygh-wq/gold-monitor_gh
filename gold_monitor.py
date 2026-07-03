@@ -41,6 +41,9 @@ EMAIL_CONFIG = {
 DAILY_ALERT_PCT = 1.5   # 日波动超 ±1.5% 即时提醒
 WEEKLY_ALERT_PCT = 3.0  # 周波动超 ±3% 即时提醒
 
+# ── 每日定时报告时间点（北京时间 HH:MM）──
+DAILY_REPORT_SLOTS = ["07:30", "13:00", "18:00"]
+
 
 def load_recipients():
     """
@@ -66,6 +69,24 @@ def load_recipients():
         "personal": data.get("personal", []),
         "general": data.get("general", []),
     }
+
+
+def load_state():
+    """读取运行状态，用于判断今日日报是否已发送"""
+    try:
+        with open("state.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"last_daily_report_date": ""}
+
+
+def save_state(state):
+    """保存运行状态"""
+    try:
+        with open("state.json", "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ 保存状态文件失败: {e}")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -662,10 +683,28 @@ def main():
     should_send = False
     alert_reason = ""
 
-    # 每日 18:00-18:15 定时报告
-    if hour == 18 and minute < 15:
-        should_send = True
-        alert_reason = "⏰ 每日18:00定时报告"
+    # 每日定时报告（多时间点）
+    state = load_state()
+    today_str = now.strftime("%Y-%m-%d")
+
+    # 兼容旧版 state.json（单字段 → 多 slot）
+    if "last_daily_slots" not in state:
+        state["last_daily_slots"] = {}
+    if "last_daily_report_date" in state:
+        old_date = state.pop("last_daily_report_date")
+        if "18:00" not in state["last_daily_slots"]:
+            state["last_daily_slots"]["18:00"] = old_date
+
+    for slot in DAILY_REPORT_SLOTS:
+        slot_h, slot_m = int(slot.split(":")[0]), int(slot.split(":")[1])
+        slot_passed = (hour > slot_h) or (hour == slot_h and minute >= slot_m)
+        slot_not_sent_today = state["last_daily_slots"].get(slot) != today_str
+        if slot_passed and slot_not_sent_today:
+            should_send = True
+            alert_reason = f"⏰ 每日{slot}定时报告"
+            state["last_daily_slots"][slot] = today_str
+            save_state(state)
+            break  # 每轮只发一份，同一轮不会命中多个 slot
 
     # 涨跌幅超限即时提醒
     day_change_abs = 0
