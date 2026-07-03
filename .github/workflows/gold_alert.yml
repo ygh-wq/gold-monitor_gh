@@ -1,7 +1,13 @@
 name: Gold Price Alert
 
+permissions:
+  contents: write
+
 on:
   schedule:
+    # 北京时间 07:00-07:45 (UTC 23:00-23:45)
+    - cron: "*/15 23 * * *"
+    # 北京时间 08:00-23:00 (UTC 00:00-15:00)
     - cron: "*/15 0-15 * * *"
   workflow_dispatch:
     inputs:
@@ -29,3 +35,13 @@ jobs:
           FORCE_SEND: ${{ github.event.inputs.force_send == 'true' && 'true' || 'false' }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: python gold_monitor.py
+
+      - name: Commit state file
+        if: github.event_name == 'schedule'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git add state.json
+          git diff --staged --quiet || (git commit -m "Update last daily report date [skip ci]" && git push)
