@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getGoldPrice, type GoldPrices } from '../../lib/gold-price'
 
 // 内存速率限制：每个邮箱每小时最多 5 次，全局每分钟最多 10 次
 const emailRateMap = new Map<string, number[]>()
@@ -11,7 +12,6 @@ const GLOBAL_WINDOW_MS = 60 * 1000           // 1 分钟
 function checkRateLimit(email: string): string | null {
   const now = Date.now()
 
-  // 全局限流
   while (globalRequests.length > 0 && now - globalRequests[0] > GLOBAL_WINDOW_MS) {
     globalRequests.shift()
   }
@@ -19,7 +19,6 @@ function checkRateLimit(email: string): string | null {
     return '请求过于频繁，请 1 分钟后再试'
   }
 
-  // 单邮箱限流
   const key = email.toLowerCase().trim()
   const timestamps = emailRateMap.get(key) ?? []
   const filtered = timestamps.filter(t => now - t < PER_EMAIL_WINDOW_MS)
@@ -31,90 +30,6 @@ function checkRateLimit(email: string): string | null {
   emailRateMap.set(key, filtered)
   globalRequests.push(now)
   return null
-}
-
-interface GoldPrices {
-  price_cny_gram: number
-  price_usd_oz: number
-  usd_cny_rate: number
-  source: string
-}
-
-async function fetchJson(url: string): Promise<unknown> {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 GoldMonitor/1.0' },
-    signal: AbortSignal.timeout(15000),
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
-}
-
-async function getGoldPrice(): Promise<GoldPrices | null> {
-  let priceUsdOz: number | null = null
-  let source = ''
-
-  // Swissquote (国内可直接访问)
-  try {
-    const data = (await fetchJson(
-      'https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAU/USD'
-    )) as Array<{
-      spreadProfilePrices: Array<{ bid: number; ask: number }>
-    }>
-    if (data?.[0]?.spreadProfilePrices?.[0]) {
-      const { bid, ask } = data[0].spreadProfilePrices[0]
-      priceUsdOz = (bid + ask) / 2
-      source = 'Swissquote'
-    }
-  } catch { /* fallback */ }
-
-  // metals.live
-  if (!priceUsdOz) {
-    try {
-      const data = (await fetchJson('https://api.metals.live/v1/spot/gold')) as Array<{ price: string }>
-      if (data.length > 0) {
-        priceUsdOz = parseFloat(data[0].price)
-        source = 'metals.live'
-      }
-    } catch { /* fallback */ }
-  }
-
-  // goldprice.org
-  if (!priceUsdOz) {
-    try {
-      const data = (await fetchJson('https://data-asg.goldprice.org/dbXRates/USD')) as {
-        items?: Array<{ xauPrice?: number }>
-      }
-      if (data.items?.[0]?.xauPrice) {
-        priceUsdOz = data.items[0].xauPrice
-        source = 'goldprice.org'
-      }
-    } catch { /* fallback */ }
-  }
-
-  if (!priceUsdOz) return null
-
-  // USD → CNY (多数据源)
-  let usdCnyRate = 7.25
-  try {
-    const data = (await fetchJson('https://api.exchangerate-api.com/v4/latest/USD')) as {
-      rates: { CNY: number }
-    }
-    usdCnyRate = data.rates.CNY
-  } catch {
-    try {
-      const data = (await fetchJson('https://api.frankfurter.app/latest?from=USD&to=CNY')) as {
-        rates: { CNY: number }
-      }
-      usdCnyRate = data.rates.CNY
-    } catch { /* use fallback */ }
-  }
-
-  return {
-    price_cny_gram: Math.round((priceUsdOz * usdCnyRate) / 31.1035 * 100) / 100,
-    price_usd_oz: Math.round(priceUsdOz * 100) / 100,
-    usd_cny_rate: Math.round(usdCnyRate * 10000) / 10000,
-    source,
-  }
 }
 
 function buildTestEmailHtml(prices: GoldPrices): string {

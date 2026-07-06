@@ -438,8 +438,6 @@ def build_email_html(prices, prev_close, last_friday_close,
   .current-price {{ font-size:48px; font-weight:700; color:#1a1a2e; margin:0; }}
   .current-price .unit {{ font-size:16px; color:#888; font-weight:400; }}
   .sub-info {{ font-size:12px; color:#999; margin-top:4px; }}
-  .comparison {{ display:flex; justify-content:center; gap:40px; padding:20px 0 0; }}
-  .comp-item {{ text-align:center; }}
   .comp-label {{ font-size:12px; color:#999; margin-bottom:4px; }}
   .comp-price {{ font-size:18px; font-weight:600; color:#333; }}
   .comp-change {{ font-size:13px; font-weight:600; margin-top:2px; }}
@@ -463,8 +461,6 @@ def build_email_html(prices, prev_close, last_friday_close,
   .prob-neutral {{ background:#f5f5f5; color:#888; }}
   .footer {{ padding:16px 24px; background:#fafafa; text-align:center; font-size:11px; color:#bbb; }}
   .summary-box {{ background:linear-gradient(135deg,#fff9e6,#fff3cd); border:1px solid #ffe082; border-radius:8px; padding:14px 16px; margin-top:12px; font-size:13px; color:#856404; line-height:1.6; }}
-  .holdings {{ display:flex; justify-content:center; gap:30px; padding:8px 0 16px; }}
-  .holding-item {{ text-align:center; }}
   .holding-val {{ font-size:16px; font-weight:600; color:#1a1a2e; }}
   .holding-label {{ font-size:11px; color:#999; }}
 </style></head><body>
@@ -481,46 +477,47 @@ def build_email_html(prices, prev_close, last_friday_close,
 
     # 持仓信息（仅 personal 收件人可见）
     if show_holdings and GOLD_GRAMS > 0:
-        html += f"""
-  <div class="holdings">
-    <div class="holding-item">
-      <div class="holding-val">{GOLD_GRAMS}g</div>
-      <div class="holding-label">持仓重量</div>
-    </div>
-    <div class="holding-item">
-      <div class="holding-val">¥{current_value:,.0f}</div>
-      <div class="holding-label">当前市值</div>
-    </div>"""
+        profit_cell = ""
         if profit is not None:
             p_color = "#e74c3c" if profit >= 0 else "#27ae60"
             p_icon = "📈" if profit >= 0 else "📉"
-            html += f"""
-    <div class="holding-item">
-      <div class="holding-val" style="color:{p_color}">{p_icon} ¥{profit:,.0f}</div>
-      <div class="holding-label">浮动盈亏</div>
-    </div>"""
-        html += "\n  </div>"
+            profit_cell = f"""<td style="text-align:center;padding:8px 15px;">
+        <div class="holding-val" style="color:{p_color}">{p_icon} ¥{profit:,.0f}</div>
+        <div class="holding-label">浮动盈亏</div>
+      </td>"""
+        html += f"""
+  <table style="margin:8px auto 16px;border:none;border-collapse:collapse;"><tr>
+    <td style="text-align:center;padding:8px 15px;">
+      <div class="holding-val">{GOLD_GRAMS}g</div>
+      <div class="holding-label">持仓重量</div>
+    </td>
+    <td style="text-align:center;padding:8px 15px;">
+      <div class="holding-val">¥{current_value:,.0f}</div>
+      <div class="holding-label">当前市值</div>
+    </td>
+    {profit_cell}
+  </tr></table>"""
 
     # 历史对比
     if prev_close or last_friday_close:
-        html += '<div class="comparison">'
+        html += '<table style="margin:20px auto 0;border:none;border-collapse:collapse;"><tr>'
         if prev_close:
             dc = day_change
             html += f"""
-    <div class="comp-item">
+    <td style="text-align:center;padding:0 20px;">
       <div class="comp-label">📅 前日收盘</div>
       <div class="comp-price">¥{prev_close:.2f}</div>
       <div class="comp-change" style="color:{change_color(dc)}">{change_icon(dc)} {dc:+.2f}%</div>
-    </div>"""
+    </td>"""
         if last_friday_close:
             wc = week_change
             html += f"""
-    <div class="comp-item">
+    <td style="text-align:center;padding:0 20px;">
       <div class="comp-label">📅 上周五收盘</div>
       <div class="comp-price">¥{last_friday_close:.2f}</div>
       <div class="comp-change" style="color:{change_color(wc)}">{change_icon(wc)} {wc:+.2f}%</div>
-    </div>"""
-        html += "</div>"
+    </td>"""
+        html += "</tr></table>"
 
     html += "</div>"
 

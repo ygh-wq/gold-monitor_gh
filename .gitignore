@@ -1,0 +1,18 @@
+# Cursor IDE
+.cursor/
+
+# Python
+__pycache__/
+*.pyc
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Next.js (also covered by web/.gitignore)
+web/.next/
+web/node_modules/
