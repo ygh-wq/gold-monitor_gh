@@ -12,6 +12,8 @@
 import os
 import json
 import time
+import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from urllib.request import Request, urlopen
@@ -583,7 +585,7 @@ def build_email_html(prices, prev_close, last_friday_close,
 
 
 def send_email(subject, html_body, recipients):
-    """通过 urllib 调用 Resend API 发送 HTML 邮件"""
+    """通过 curl 调用 Resend API 发送 HTML 邮件"""
     config = EMAIL_CONFIG
     api_key = config["resend_api_key"]
 
@@ -600,39 +602,60 @@ def send_email(subject, html_body, recipients):
             "subject": subject,
             "html": html_body,
         }
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        payload_str = json.dumps(payload, ensure_ascii=True)
 
-        req = Request(
-            "https://api.resend.com/emails",
-            data=data,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
-            method="POST",
-        )
-
+        fd, tmp_path = tempfile.mkstemp(suffix=".json", text=True)
         try:
-            with urlopen(req, timeout=60) as resp:
-                resp_body = resp.read().decode("utf-8")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload_str)
+
+            result = subprocess.run(
+                [
+                    "curl", "-s", "-w", "\n%{http_code}",
+                    "-X", "POST",
+                    "https://api.resend.com/emails",
+                    "-H", f"Authorization: Bearer {api_key}",
+                    "-H", "Content-Type: application/json",
+                    "-d", f"@{tmp_path}",
+                    "--connect-timeout", "30",
+                    "--max-time", "60",
+                ],
+                capture_output=True, text=True, timeout=65
+            )
+
+            output = result.stdout.strip()
+            lines = output.rsplit("\n", 1)
+            if len(lines) == 2:
+                http_code = lines[1].strip()
+                resp_body = lines[0].strip()
+            else:
+                http_code = "0"
+                resp_body = output
+
+            if http_code == "200":
                 try:
-                    resp_data = json.loads(resp_body)
-                    print(f"✅ 邮件已发送: {to_email} (ID: {resp_data.get('id', 'N/A')})")
+                    resp = json.loads(resp_body)
+                    print(f"✅ 邮件已发送: {to_email} (ID: {resp.get('id', 'N/A')})")
                 except json.JSONDecodeError:
-                    print(f"✅ 邮件已发送: {to_email}")
-        except URLError as e:
-            error_body = ""
-            if hasattr(e, "read"):
-                try:
-                    error_body = e.read().decode("utf-8", errors="replace")
-                except Exception:
-                    pass
-            http_code = getattr(e, "code", "N/A") if hasattr(e, "code") else "N/A"
-            print(f"❌ 发送失败 [{to_email}]: HTTP {http_code}")
-            if error_body:
-                print(f"   body: {error_body[:300]}")
+                    print(f"✅ 邮件已发送: {to_email} (HTTP {http_code})")
+            else:
+                print(f"❌ 发送失败 [{to_email}]: HTTP {http_code}")
+                if result.stderr:
+                    print(f"   stderr: {result.stderr.strip()}")
+                if resp_body:
+                    print(f"   body: {resp_body[:300]}")
+
+        except subprocess.TimeoutExpired:
+            print(f"❌ 发送超时 [{to_email}]")
+        except FileNotFoundError:
+            print(f"❌ 系统未安装 curl [{to_email}]")
         except Exception as e:
             print(f"❌ 发送失败 [{to_email}]: {e}")
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     return True
 
