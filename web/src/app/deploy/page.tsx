@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 
-const REPO_URL = 'https://github.com/ygh-wq/gold-monitor_gh'
+const REPO_URL = 'https://github.com/keoku/gold-monitor_gh'
 
 interface ConfigForm {
   goldGrams: string
@@ -39,15 +39,18 @@ export default function DeployPage() {
     .filter((s) => /^\d{2}:\d{2}$/.test(s))
 
   const variables = [
-    { name: 'GOLD_GRAMS', value: config.goldGrams || '0', desc: '持有黄金克数' },
-    { name: 'INVESTED_AMOUNT', value: config.investedAmount || '0', desc: '投入总金额(元)' },
-    { name: 'DAILY_ALERT_PCT', value: config.dailyAlertPct, desc: '日波动阈值(%)' },
-    { name: 'WEEKLY_ALERT_PCT', value: config.weeklyAlertPct, desc: '周波动阈值(%)' },
+    { name: 'GOLD_GRAMS', value: config.goldGrams || '0', desc: '持有黄金克数', optional: true },
+    { name: 'INVESTED_AMOUNT', value: config.investedAmount || '0', desc: '投入总金额(元)', optional: true },
+    { name: 'DAILY_ALERT_PCT', value: config.dailyAlertPct, desc: '日波动阈值(%)', optional: true },
+    { name: 'WEEKLY_ALERT_PCT', value: config.weeklyAlertPct, desc: '周波动阈值(%)', optional: true },
     {
       name: 'REPORT_SLOTS',
       value: JSON.stringify(generatedSlots.length > 0 ? generatedSlots : ['07:30', '13:00', '18:00']),
-      desc: '推送时间',
+      desc: '推送时间(JSON 数组)',
+      optional: true,
     },
+    { name: 'SENDER_NAME', value: '黄金智能监控', desc: '邮件发件人名称', optional: true },
+    { name: 'FROM_EMAIL', value: 'onboarding@resend.dev', desc: '发件邮箱地址', optional: true },
   ]
 
   return (
@@ -293,8 +296,13 @@ export default function DeployPage() {
               <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded">
                 Variables
               </span>
-              普通配置变量
+              普通配置变量（全部可选，有默认值）
             </h3>
+            <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-xs text-amber-700">
+                ⚠️ 只添加你需要自定义的变量。不需要修改的请不要创建（空值不等于默认值，会导致功能异常）。
+              </p>
+            </div>
             <div className="border rounded-lg overflow-hidden divide-y">
               {variables.map((v) => (
                 <div
