@@ -596,13 +596,16 @@ def send_email(subject, html_body, recipients):
     for to_email in recipients:
         if not to_email or not to_email.strip():
             continue
+        from_addr = f"{config['sender_name']} <{config['from_email']}>"
+        print(f"📧 from: {from_addr}")
+        print(f"📧 to: {to_email}")
         payload = {
-            "from": f"{config['sender_name']} <{config['from_email']}>",
+            "from": from_addr,
             "to": [to_email],
             "subject": subject,
             "html": html_body,
         }
-        payload_str = json.dumps(payload, ensure_ascii=True)
+        payload_str = json.dumps(payload, ensure_ascii=False)
 
         fd, tmp_path = tempfile.mkstemp(suffix=".json", text=True)
         try:
