@@ -25,8 +25,8 @@ from urllib.parse import quote
 # ╚═══════════════════════════════════════════════════════════════╝
 
 # ── 投资信息（通过环境变量配置，无需改代码）──
-GOLD_GRAMS = float(os.environ.get("GOLD_GRAMS", "0"))
-INVESTED_AMOUNT = float(os.environ.get("INVESTED_AMOUNT", "0"))
+GOLD_GRAMS = float(os.environ.get("GOLD_GRAMS") or "0")
+INVESTED_AMOUNT = float(os.environ.get("INVESTED_AMOUNT") or "0")
 
 # ── 邮件配置 (通过 GitHub Secrets 保护，不在代码中暴露) ──
 EMAIL_CONFIG = {
@@ -36,11 +36,21 @@ EMAIL_CONFIG = {
 }
 
 # ── 提醒阈值 ──
-DAILY_ALERT_PCT = float(os.environ.get("DAILY_ALERT_PCT", "1.5"))
-WEEKLY_ALERT_PCT = float(os.environ.get("WEEKLY_ALERT_PCT", "3.0"))
+DAILY_ALERT_PCT = float(os.environ.get("DAILY_ALERT_PCT") or "1.0")
+WEEKLY_ALERT_PCT = float(os.environ.get("WEEKLY_ALERT_PCT") or "3.0")
+
+# ── 阶梯式预警档位（JSON 数组，第一档默认使用上面的阈值）──
+def _parse_tiers(env_key, first_tier, default_rest):
+    raw = os.environ.get(env_key, "").strip()
+    if raw:
+        return [float(x) for x in json.loads(raw)]
+    return [first_tier] + default_rest
+
+DAILY_VOLATILITY_TIERS = _parse_tiers("DAILY_VOLATILITY_TIERS", DAILY_ALERT_PCT, [2.0, 3.0, 4.0, 5.0])
+WEEKLY_VOLATILITY_TIERS = _parse_tiers("WEEKLY_VOLATILITY_TIERS", WEEKLY_ALERT_PCT, [5.0, 8.0, 12.0])
 
 # ── 每日定时报告时间点（北京时间 HH:MM）──
-DAILY_REPORT_SLOTS = json.loads(os.environ.get("REPORT_SLOTS", '["07:30","13:00","18:00"]'))
+DAILY_REPORT_SLOTS = json.loads(os.environ.get("REPORT_SLOTS") or '["07:30","13:00","18:00"]')
 
 
 def load_recipients():
@@ -754,9 +764,6 @@ def main():
             break
 
     # 涨跌幅超限即时提醒（阶梯式冷却：同方向需跨越更高阈值档才会再次通知）
-    # 阈值档位：1.5% → 3% → 5% → 8%，每跨一档发一次
-    VOLATILITY_TIERS = [DAILY_ALERT_PCT, 3.0, 5.0, 8.0]
-    WEEKLY_VOLATILITY_TIERS = [WEEKLY_ALERT_PCT, 5.0, 8.0, 12.0]
 
     if "last_volatility_alerts" not in state:
         state["last_volatility_alerts"] = {}
@@ -780,7 +787,7 @@ def main():
 
     if day_change_abs >= DAILY_ALERT_PCT:
         alert_key = f"day_{day_direction}"
-        current_tier = get_current_tier(day_change_abs, VOLATILITY_TIERS)
+        current_tier = get_current_tier(day_change_abs, DAILY_VOLATILITY_TIERS)
         last_record = state["last_volatility_alerts"].get(alert_key, {})
         last_date = last_record.get("date", "") if isinstance(last_record, dict) else last_record
         last_tier = last_record.get("tier", 0) if isinstance(last_record, dict) else 0

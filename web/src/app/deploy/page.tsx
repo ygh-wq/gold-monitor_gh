@@ -20,7 +20,7 @@ export default function DeployPage() {
     goldGrams: '',
     investedAmount: '',
     email: '',
-    dailyAlertPct: '1.5',
+    dailyAlertPct: '1.0',
     weeklyAlertPct: '3.0',
     reportSlots: '07:30, 13:00, 18:00',
   })

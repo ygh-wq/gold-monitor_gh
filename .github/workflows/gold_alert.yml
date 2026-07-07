@@ -42,6 +42,8 @@ jobs:
           INVESTED_AMOUNT: ${{ vars.INVESTED_AMOUNT }}
           DAILY_ALERT_PCT: ${{ vars.DAILY_ALERT_PCT }}
           WEEKLY_ALERT_PCT: ${{ vars.WEEKLY_ALERT_PCT }}
+          DAILY_VOLATILITY_TIERS: ${{ vars.DAILY_VOLATILITY_TIERS }}
+          WEEKLY_VOLATILITY_TIERS: ${{ vars.WEEKLY_VOLATILITY_TIERS }}
           REPORT_SLOTS: ${{ vars.REPORT_SLOTS }}
           SENDER_NAME: ${{ vars.SENDER_NAME }}
           FROM_EMAIL: ${{ vars.FROM_EMAIL }}

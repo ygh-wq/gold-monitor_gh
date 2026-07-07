@@ -104,8 +104,10 @@
 |------|------|--------|
 | `GOLD_GRAMS` | 你持有的黄金克数 | `0`（不显示持仓信息） |
 | `INVESTED_AMOUNT` | 你投入的总金额（元） | `0` |
-| `DAILY_ALERT_PCT` | 日波动提醒阈值（%） | `1.5` |
+| `DAILY_ALERT_PCT` | 日波动提醒阈值（%） | `1.0` |
 | `WEEKLY_ALERT_PCT` | 周波动提醒阈值（%） | `3.0` |
+| `DAILY_VOLATILITY_TIERS` | 日波动阶梯预警档位（JSON 数组） | `[1.0, 2.0, 3.0, 4.0, 5.0]`（第一档跟随 DAILY_ALERT_PCT） |
+| `WEEKLY_VOLATILITY_TIERS` | 周波动阶梯预警档位（JSON 数组） | `[3.0, 5.0, 8.0, 12.0]`（第一档跟随 WEEKLY_ALERT_PCT） |
 | `REPORT_SLOTS` | 每日推送时间（JSON 数组） | `["07:30","13:00","18:00"]` |
 | `SENDER_NAME` | 邮件发件人名称 | `黄金智能监控` |
 | `FROM_EMAIL` | 发件邮箱地址 | `onboarding@resend.dev` |
@@ -239,8 +241,12 @@ RESEND_API_KEY=re_你的API_KEY
 
 ### 调整波动阈值
 
-- `DAILY_ALERT_PCT`: 日涨跌幅超过此百分比时触发第一档预警（默认 1.5）
+- `DAILY_ALERT_PCT`: 日涨跌幅超过此百分比时触发第一档预警（默认 1.0）
 - `WEEKLY_ALERT_PCT`: 周涨跌幅超过此百分比时触发第一档预警（默认 3.0）
+- `DAILY_VOLATILITY_TIERS`: 自定义日波动阶梯档位，JSON 数组格式。不配置时默认为 `[1.0, 2.0, 3.0, 4.0, 5.0]`（第一档跟随 DAILY_ALERT_PCT）
+- `WEEKLY_VOLATILITY_TIERS`: 自定义周波动阶梯档位，JSON 数组格式。不配置时默认为 `[3.0, 5.0, 8.0, 12.0]`（第一档跟随 WEEKLY_ALERT_PCT）
+
+例如，设置 `DAILY_VOLATILITY_TIERS` 为 `[0.5, 1.5, 3.0, 6.0]` 表示日波动达到 0.5%、1.5%、3%、6% 时分别触发预警。
 
 ### 夜间监控
 
