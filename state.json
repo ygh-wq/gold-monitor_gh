@@ -7,10 +7,10 @@
   "last_volatility_alerts": {
     "day_down": {
       "date": "2026-10-22",
-      "tier": 1.0
+      "tier": 2.0
     },
     "week_down": {
-      "date": "2026-10-01",
+      "date": "2026-10-22",
       "tier": 3.0
     },
     "day_up": {
