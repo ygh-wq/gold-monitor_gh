@@ -82,8 +82,10 @@ jobs:
           CUTOFF="$(date -u -d "${TODAY} 00:00 +0800" '+%Y-%m-%dT%H:%M:%SZ')"
           echo "今日: ${TODAY}，检查窗口起点(UTC): ${CUTOFF}"
 
-          # 1) 邮件今天是否已推送过（当天只推一次）
-          LAST="$(curl -sS "${auth[@]}" "${API}/repos/${GITHUB_REPOSITORY}/actions/vars/WB_NOTIFY_LAST_DATE" | jq -r '.value // ""')"
+          # 1) 邮件今天是否已推送过（状态文件记录，当天只推一次）
+          git pull --rebase origin main || true
+          LAST=""
+          [ -f wb_notify_state.json ] && LAST="$(jq -r '.last_sent_date // ""' wb_notify_state.json 2>/dev/null || echo '')"
           if [ "${LAST}" = "${TODAY}" ]; then
             echo "今日签到邮件已推送过（${LAST}），不再推送"
             exit 0
@@ -145,14 +147,14 @@ jobs:
             exit 0
           fi
 
-          # 5) 记录推送日期（当天后续运行不再推送）
-          VCODE="$(curl -sS -o /dev/null -w '%{http_code}' -X PATCH "${auth[@]}" \
-            -d "$(jq -n --arg v "${TODAY}" '{value:$v}')" \
-            "${API}/repos/${GITHUB_REPOSITORY}/actions/vars/WB_NOTIFY_LAST_DATE")"
-          if [ "${VCODE}" = "204" ]; then
-            echo "已更新 WB_NOTIFY_LAST_DATE=${TODAY}"
-          else
-            curl -sS "${auth[@]}" -X POST \
-              -d "$(jq -n --arg v "${TODAY}" '{name:"WB_NOTIFY_LAST_DATE", value:$v}')" \
-              "${API}/repos/${GITHUB_REPOSITORY}/actions/vars" -o /dev/null -w "创建变量 HTTP %{http_code}\n"
+          # 5) 记录推送日期到状态文件并提交（当天后续运行不再推送）
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git pull --rebase origin main || true
+          printf '{"last_sent_date": "%s"}\n' "${TODAY}" > wb_notify_state.json
+          git add wb_notify_state.json
+          if ! git diff --staged --quiet; then
+            git commit -m "wb notify state ${TODAY} [skip ci]" && git push \
+              || echo "::warning::状态文件提交失败，下轮可能重复推送一封邮件"
           fi
+          echo "已记录推送日期: ${TODAY}"
