@@ -1,0 +1,121 @@
+name: Gold Price Precise Slots
+
+# ════════════════════════════════════════════════════════════════
+#  精确对时工作流：解决 GitHub schedule「丢跑 + 落点随机」导致的
+#  报告晚到约 1 小时的问题。
+#
+#  原理：每个时间槽提前约 1.5 小时由 schedule 启动运行器，任务内
+#  心跳式睡眠到北京时间 07:30:00 / 13:00:00 / 18:00:00 整点，再执行
+#  gold_monitor.py —— 运行落点精确，不再依赖被高负载丢弃的 schedule
+#  落点。本仓库为公开仓库，Actions 分钟数免费。
+#
+#  三层触发体系（互为备份，state.json 去重保证不重复发送）：
+#    1. 本工作流（主力）：睡眠对时，准点发送
+#    2. cron-job.org 外部触发 gold_alert.yml（你修复后即恢复为准点）
+#    3. gold_alert.yml 的 15 分钟 schedule 兜底（补发漏掉的槽）
+#
+#  concurrency 与 gold_alert.yml 共用 gold-monitor 组：整仓库串行，
+#  杜绝两次运行同时判定「该发」导致的重复邮件。
+# ════════════════════════════════════════════════════════════════
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gold-monitor
+  cancel-in-progress: false
+
+on:
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "目标时间槽（北京时间 HH:MM，留空则按当前时间自动匹配）"
+        required: false
+        default: ""
+  # 每个槽两个启动点互为备份（GitHub 可能整条丢弃某次 schedule），
+  # 拉起晚的那条会在心跳睡眠中自动收敛到准点
+  schedule:
+    - cron: "0 22 * * *"     # 北京 06:00 启动 → 07:30 准点
+    - cron: "45 22 * * *"    # 北京 06:45 启动 → 07:30 准点（备份）
+    - cron: "30 3 * * *"     # 北京 11:30 启动 → 13:00 准点
+    - cron: "15 4 * * *"     # 北京 12:15 启动 → 13:00 准点（备份）
+    - cron: "30 8 * * *"     # 北京 16:30 启动 → 18:00 准点
+    - cron: "15 9 * * *"     # 北京 17:15 启动 → 18:00 准点（备份）
+
+jobs:
+  precise-slot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 心跳睡眠至时间槽整点
+        env:
+          TARGET_SLOT: ${{ github.event.inputs.slot }}
+        run: |
+          set -euo pipefail
+          SLOT="${TARGET_SLOT:-}"
+          if [ -z "${SLOT}" ]; then
+            # 自动匹配：离哪个槽最近且未过，就睡到哪个槽
+            # （分界取两槽中点；启动点严重延迟时也会落到正确的槽）
+            BJ_HHMM="$(TZ=Asia/Shanghai date +%H:%M)"
+            if   [ "${BJ_HHMM}" \< "10:15" ]; then SLOT="07:30"
+            elif [ "${BJ_HHMM}" \< "15:15" ]; then SLOT="13:00"
+            else SLOT="18:00"
+            fi
+          fi
+          echo "目标时间槽（北京时间）: ${SLOT}"
+
+          TARGET_EPOCH="$(TZ=Asia/Shanghai date -d "today ${SLOT}" +%s)"
+          NOW_EPOCH="$(date +%s)"
+          DIFF="$((TARGET_EPOCH - NOW_EPOCH))"
+
+          if [ "${DIFF}" -gt 0 ]; then
+            echo "睡眠等待 ${DIFF} 秒后准点运行"
+            ELAPSED=0
+            while [ "${ELAPSED}" -lt "${DIFF}" ]; do
+              REMAIN="$((DIFF - ELAPSED))"
+              CHUNK=60
+              [ "${REMAIN}" -lt 60 ] && CHUNK="${REMAIN}"
+              sleep "${CHUNK}"
+              ELAPSED="$((ELAPSED + CHUNK))"
+              echo "已等待 ${ELAPSED}/${DIFF} 秒"
+            done
+          else
+            echo "已过 ${SLOT} $((-DIFF)) 秒，立即运行（gold_monitor.py 将按补发逻辑处理）"
+          fi
+          echo "运行时刻（北京时间）: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+
+      - name: Run gold monitor
+        env:
+          FORCE_SEND: "false"
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          GOLD_GRAMS: ${{ vars.GOLD_GRAMS }}
+          INVESTED_AMOUNT: ${{ vars.INVESTED_AMOUNT }}
+          DAILY_ALERT_PCT: ${{ vars.DAILY_ALERT_PCT }}
+          WEEKLY_ALERT_PCT: ${{ vars.WEEKLY_ALERT_PCT }}
+          DAILY_VOLATILITY_TIERS: ${{ vars.DAILY_VOLATILITY_TIERS }}
+          WEEKLY_VOLATILITY_TIERS: ${{ vars.WEEKLY_VOLATILITY_TIERS }}
+          REPORT_SLOTS: ${{ vars.REPORT_SLOTS }}
+          SENDER_NAME: ${{ vars.SENDER_NAME }}
+          FROM_EMAIL: ${{ vars.FROM_EMAIL }}
+        run: python gold_monitor.py
+
+      - name: Commit state file
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git pull --rebase origin main || true
+          git add state.json
+          git diff --staged --quiet || (git commit -m "Update state [skip ci]" && git push)
