@@ -3,12 +3,6 @@ name: Gold Price Alert
 permissions:
   contents: write
 
-# 串行化运行：避免相邻两次定时运行并发执行时，
-# state.json / wb_notify_state.json 的 git push 互相冲突
-concurrency:
-  group: gold-monitor
-  cancel-in-progress: false
-
 on:
   # 外部定时服务精确触发（主要方式，通过 cron-job.org 调用 GitHub API）
   workflow_dispatch:
@@ -27,7 +21,7 @@ on:
 jobs:
   check-gold-price:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
 
     steps:
       - name: Checkout code
@@ -65,7 +59,7 @@ jobs:
           git add state.json
           git diff --staged --quiet || (git commit -m "Update state [skip ci]" && git push)
 
-      - name: 联动 workbuddy 签到并推送邮件（兜底，每天一次，幂等去重）
+      - name: 联动 workbuddy 签到并推送邮件（每天一次，幂等去重）
         if: always()
         env:
           WB_TRIGGER_TOKEN: ${{ secrets.WB_TRIGGER_TOKEN }}
@@ -84,15 +78,6 @@ jobs:
             exit 0
           fi
 
-          # 解耦设计：wb 签到以 workbuddy_auto_checkin 仓库自身的 schedule 为主
-          # （北京 08:07-08:52 主时段），本联动仅作兜底，09:05 后才介入。
-          # 这样 gold 监控与 wb 签到互不依赖：任一方停摆，另一方仍正常运行。
-          BJ_HHMM="$(TZ=Asia/Shanghai date +%H:%M)"
-          if [ "${BJ_HHMM}" \< "09:05" ]; then
-            echo "北京时间 ${BJ_HHMM}，wb 自身 schedule 主时段（08:07-08:52）尚未结束，本次跳过联动兜底"
-            exit 0
-          fi
-
           TODAY="$(TZ=Asia/Shanghai date +%Y-%m-%d)"
           CUTOFF="$(date -u -d "${TODAY} 00:00 +0800" '+%Y-%m-%dT%H:%M:%SZ')"
           echo "今日: ${TODAY}，检查窗口起点(UTC): ${CUTOFF}"
@@ -106,43 +91,23 @@ jobs:
             exit 0
           fi
 
-          # 2) 确保今天有一次成功的签到运行
-          #    - 今日无运行 → 触发
-          #    - 今日运行失败（failure/cancelled/timed_out）→ 幂等重试（脚本幂等，不会重复领奖）
-          #    - 今日运行进行中 → 等待完成
-          get_newest() {
-            curl -sS -G "${auth[@]}" --data-urlencode "created=>=${CUTOFF}" --data-urlencode "per_page=1" \
-              "${API}/repos/${WB_REPO}/actions/workflows/daily.yml/runs" | jq -r '.workflow_runs[0].id // empty'
-          }
-
-          NEWEST="$(get_newest)"
-          if [ -n "${NEWEST}" ]; then
-            CONC="$(curl -sS "${auth[@]}" "${API}/repos/${WB_REPO}/actions/runs/${NEWEST}" | jq -r '.conclusion // ""')"
-          fi
-
-          if [ -z "${NEWEST}" ] || [ "${CONC}" = "failure" ] || [ "${CONC}" = "cancelled" ] || [ "${CONC}" = "timed_out" ]; then
-            if [ -n "${NEWEST}" ]; then
-              echo "今日已有签到运行但结论为 ${CONC}，幂等重试一次..."
-            else
-              echo "今日尚无签到运行，触发一次..."
-            fi
+          # 2) 确保今天有一次签到运行；没有则触发并等待完成
+          NEWEST="$(curl -sS -G "${auth[@]}" --data-urlencode "created=>=${CUTOFF}" --data-urlencode "per_page=5" \
+            "${API}/repos/${WB_REPO}/actions/workflows/daily.yml/runs" | jq -r '.workflow_runs[0].id // empty')"
+          if [ -z "${NEWEST}" ]; then
+            echo "今日尚无签到运行，触发一次..."
             curl -sS "${auth[@]}" -X POST -d '{"ref":"main"}' -o /dev/null -w "dispatch HTTP %{http_code}\n" \
               "${API}/repos/${WB_REPO}/actions/workflows/daily.yml/dispatches"
+            for i in $(seq 1 30); do
+              sleep 5
+              NEWEST="$(curl -sS -G "${auth[@]}" --data-urlencode "created=>=${CUTOFF}" --data-urlencode "per_page=1" \
+                "${API}/repos/${WB_REPO}/actions/workflows/daily.yml/runs" | jq -r '.workflow_runs[0].id // empty')"
+              [ -n "${NEWEST}" ] || continue
+              ST="$(curl -sS "${auth[@]}" "${API}/repos/${WB_REPO}/actions/runs/${NEWEST}" | jq -r '.status')"
+              [ "${ST}" = "completed" ] && break
+            done
           fi
-
-          for i in $(seq 1 36); do
-            sleep 5
-            NEWEST="$(get_newest)"
-            [ -n "${NEWEST}" ] || continue
-            ST="$(curl -sS "${auth[@]}" "${API}/repos/${WB_REPO}/actions/runs/${NEWEST}" | jq -r '.status')"
-            [ "${ST}" = "completed" ] && break
-          done
           [ -n "${NEWEST}" ] || { echo "::warning::未能获取今日签到运行"; exit 0; }
-          ST="$(curl -sS "${auth[@]}" "${API}/repos/${WB_REPO}/actions/runs/${NEWEST}" | jq -r '.status')"
-          if [ "${ST}" != "completed" ]; then
-            echo "::notice::签到运行仍在进行中（${NEWEST}），下轮 gold 运行再校验并推送邮件"
-            exit 0
-          fi
           CONC="$(curl -sS "${auth[@]}" "${API}/repos/${WB_REPO}/actions/runs/${NEWEST}" | jq -r '.conclusion // ""')"
           echo "最新签到运行: ${NEWEST}，结论: ${CONC}"
 

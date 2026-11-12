@@ -745,45 +745,23 @@ def main():
         if "18:00" not in state["last_daily_slots"]:
             state["last_daily_slots"]["18:00"] = old_date
 
-    SLOT_WINDOW_MINUTES = 45  # slot 后 45 分钟内视为准点发送
+    SLOT_WINDOW_MINUTES = 45  # slot 过后超过此时间不再补发
 
-    # GitHub schedule 延迟/丢跑严重，实际运行时间不可控（可能偏移数小时）：
-    # 每次运行时，找出「今天已到点且还没发」的时间槽中时间最新的一个，无论延迟多久都补发。
-    # 报告取的是运行时的实时价格，数据本身不过期；只补一个，避免一次运行连发多份。
-    current_minutes = hour * 60 + minute
-    latest_due_slot = None
-    latest_due_minutes = -1
-    for slot in DAILY_REPORT_SLOTS:  # 列表按时间升序，遍历后留下的是时间最新的待发槽
+    for slot in DAILY_REPORT_SLOTS:
         slot_h, slot_m = int(slot.split(":")[0]), int(slot.split(":")[1])
+        current_minutes = hour * 60 + minute
         slot_minutes = slot_h * 60 + slot_m
         minutes_past_slot = current_minutes - slot_minutes
-        if minutes_past_slot < 0:
-            continue  # 今天的这个槽还没到点
-        if state["last_daily_slots"].get(slot) == today_str:
-            continue  # 今天已发过（含补发）
-        latest_due_slot = slot
-        latest_due_minutes = minutes_past_slot
 
-    if latest_due_slot:
-        should_send = True
-        if latest_due_minutes <= SLOT_WINDOW_MINUTES:
-            alert_reason = f"⏰ 每日{latest_due_slot}定时报告"
-        else:
-            alert_reason = (
-                f"⏰ 每日{latest_due_slot}定时报告"
-                f"（补发：延迟 {latest_due_minutes // 60} 小时 {latest_due_minutes % 60} 分钟）"
-            )
-        # 更早的未发槽位已被本次最新报告覆盖，一并标记，避免后续运行补发过期报告
-        for slot in DAILY_REPORT_SLOTS:
-            if slot == latest_due_slot:
-                break
-            slot_h, slot_m = int(slot.split(":")[0]), int(slot.split(":")[1])
-            minutes_past_slot = current_minutes - (slot_h * 60 + slot_m)
-            if minutes_past_slot >= 0 and state["last_daily_slots"].get(slot) != today_str:
-                state["last_daily_slots"][slot] = today_str
-                print(f"↩️ {slot} 报告由本次 {latest_due_slot} 报告覆盖，跳过补发")
-        state["last_daily_slots"][latest_due_slot] = today_str
-        save_state(state)
+        slot_in_window = 0 <= minutes_past_slot <= SLOT_WINDOW_MINUTES
+        slot_not_sent_today = state["last_daily_slots"].get(slot) != today_str
+
+        if slot_in_window and slot_not_sent_today:
+            should_send = True
+            alert_reason = f"⏰ 每日{slot}定时报告"
+            state["last_daily_slots"][slot] = today_str
+            save_state(state)
+            break
 
     # 涨跌幅超限即时提醒（阶梯式冷却：同方向需跨越更高阈值档才会再次通知）
 
